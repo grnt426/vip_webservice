@@ -7,17 +7,17 @@ import logging
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Use a relative path that works both in development and in container
-DUMPS_DIR = "dumps"
-DB_FILE = os.path.join(DUMPS_DIR, "guild.db")
-SQLALCHEMY_DATABASE_URL = f"sqlite:///./{DB_FILE}"
+# Use /app/data for the database file
+DATA_DIR = "/app/data"
+DB_FILE = os.path.join(DATA_DIR, "guild.db")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
 
 logger.info(f"Database URL: {SQLALCHEMY_DATABASE_URL}")
 
 try:
-    # Ensure the dumps directory exists
-    os.makedirs(DUMPS_DIR, exist_ok=True)
-    logger.info(f"Using dumps directory: {os.path.abspath(DUMPS_DIR)}")
+    # Ensure the data directory exists
+    os.makedirs(DATA_DIR, exist_ok=True)
+    logger.info(f"Using data directory: {os.path.abspath(DATA_DIR)}")
 
     # Create SQLite engine
     # check_same_thread is needed for SQLite specifically

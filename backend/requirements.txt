@@ -13,3 +13,4 @@ typing_extensions==4.13.2
 uvicorn==0.24.0
 sqlalchemy==2.0.23
 httpx==0.25.2
+aiohttp==3.9.3

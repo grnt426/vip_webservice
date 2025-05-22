@@ -24,6 +24,7 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file from backend directory
@@ -55,4 +56,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # Run the application with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"] 
+CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8080", "--reload"] 
