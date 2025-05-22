@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, CssBaseline } from '@mui/material';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 
 import TitleBar from "./components/TitleBar";
@@ -7,25 +7,82 @@ import SideBar from "./components/SideBar";
 import Footer from "./components/Footer";
 import HomePage from "./pages/Home";
 import GuildDashboard from "./pages/GuildDashboard";
-import ExampleCardsPage from "./pages/ExampleCards";
-import ExampleChartPage from "./pages/ExampleChart";
-import ExampleDataGridPage from "./pages/ExampleDataGrid";
+import GuildLogsPage from "./pages/GuildLogsPage";
+import GuildMembersPage from "./pages/GuildMembersPage";
 import AboutPage from "./pages/About";
 import ContactPage from "./pages/Contact";
 
-// See https://mui.com/material-ui/customization/palette/ for defining colors and themes
-const vipGuildColor = {
-  main: '#47A0CA',  // This is a VIP Guild color.
-  light: '#5bbadc', // This is not a VIP Guild color, but a lighter shade of main.
-  dark: '#397da3',  // This is not a VIP Guild color, but a darker shade of main.
-  contrastText: '#fff', // White text to be displayed on main color background.
-};
-// Complementary color to #47A0CA (VIP Guild color) is #ca7047
-
 const theme = createTheme({
   palette: {
-    primary: vipGuildColor,
-    // can also define secondary, error, warning, info, success palettes
+    mode: 'dark',
+    primary: {
+      main: '#ff4d4d', // Vibrant red
+      light: '#ff8080',
+      dark: '#cc0000',
+      contrastText: '#ffffff',
+    },
+    secondary: {
+      main: '#9c27b0', // Purple
+      light: '#d05ce3',
+      dark: '#6a0080',
+      contrastText: '#ffffff',
+    },
+    background: {
+      default: '#1a1a1a', // Very dark gray
+      paper: '#2d2d2d', // Slightly lighter dark gray
+    },
+    error: {
+      main: '#ff3d00', // Orange-red
+    },
+    warning: {
+      main: '#ff9100', // Orange
+    },
+    info: {
+      main: '#b388ff', // Light purple
+    },
+    success: {
+      main: '#ff6e40', // Coral orange
+    },
+    text: {
+      primary: '#ffffff',
+      secondary: '#cccccc',
+    },
+  },
+  components: {
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          background: 'linear-gradient(145deg, #2d2d2d 0%, #1a1a1a 100%)',
+          borderRadius: '12px',
+        },
+      },
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          background: 'linear-gradient(90deg, #1a1a1a 0%, #2d2d2d 100%)',
+        },
+      },
+    },
+    MuiDrawer: {
+      styleOverrides: {
+        paper: {
+          background: 'linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%)',
+          borderRight: '1px solid #333333',
+        },
+      },
+    },
+    MuiLinearProgress: {
+      styleOverrides: {
+        root: {
+          borderRadius: 5,
+          height: 8,
+        },
+        bar: {
+          borderRadius: 5,
+        },
+      },
+    },
   },
 });
 
@@ -37,12 +94,10 @@ const App: React.FC = () => {
         return <HomePage />;
       case 'GuildDashboard':
         return <GuildDashboard />;
-      case 'ExampleCards':
-        return <ExampleCardsPage />;
-      case 'ExampleChart':
-        return <ExampleChartPage />;
-      case 'ExampleDataGrid':
-        return <ExampleDataGridPage />;
+      case 'GuildMembers':
+        return <GuildMembersPage />;
+      case 'GuildLogs':
+        return <GuildLogsPage />;
       case 'About':
         return <AboutPage />;
       case 'Contact':
@@ -55,11 +110,12 @@ const App: React.FC = () => {
   return (
     <>
       <ThemeProvider theme={theme}>
-        <Box sx={{ display:"flex", flexDirection:"column" }}>
+        <CssBaseline />
+        <Box sx={{ display:"flex", flexDirection:"column", minHeight: '100vh', bgcolor: 'background.default' }}>
           <TitleBar />
-          <Box sx={{ display: 'flex'}}>
+          <Box sx={{ display: 'flex', flex: 1 }}>
             <SideBar onSelect={setContent} />
-            <Box sx={{ flexGrow: 1, p:1 }}>
+            <Box sx={{ flexGrow: 1, p: 3 }}>
               {renderContent()}
               <Footer />
             </Box>

@@ -1,31 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Container, Typography, CircularProgress, Box, Stack } from '@mui/material';
+import { Box, Container, Typography, CircularProgress, Stack } from '@mui/material';
 import GuildTile from '../components/GuildTile';
-import { GuildData } from '../types/guild';
+import { useGuilds } from '../hooks/useGuilds';
 
 const GuildDashboard: React.FC = () => {
-  const [guilds, setGuilds] = useState<GuildData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchGuilds = async () => {
-      try {
-        const response = await fetch('http://localhost:8080/api/guilds');
-        if (!response.ok) {
-          throw new Error('Failed to fetch guild data');
-        }
-        const data = await response.json();
-        setGuilds(data);
-        setLoading(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred');
-        setLoading(false);
-      }
-    };
-
-    fetchGuilds();
-  }, []);
+  const { guilds, loading, error } = useGuilds();
 
   if (loading) {
     return (
@@ -49,16 +27,13 @@ const GuildDashboard: React.FC = () => {
         Guild Dashboard
       </Typography>
       <Stack 
-        direction="row" 
-        spacing={3} 
-        useFlexGap 
-        flexWrap="wrap"
+        spacing={4}
         sx={{
           '& > *': {
             width: {
               xs: '100%',
-              sm: 'calc(50% - 24px)',
-              md: 'calc(33.333% - 24px)'
+              // Only show two guilds per row on very wide screens
+              '2xl': 'calc(50% - 32px)'
             }
           }
         }}

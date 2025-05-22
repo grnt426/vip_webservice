@@ -1,7 +1,10 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 
 from app.database import Base
+from .guild_member import guild_memberships, GuildMembership
+from app.utils.name_utils import split_account_name
 
 class Guild(Base):
     __tablename__ = "guilds"
@@ -19,11 +22,42 @@ class Guild(Base):
     resonance = Column(Integer, default=0)
     favor = Column(Integer, default=0)
 
-    # Emblem relationship
+    # Metadata
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_log_id = Column(Integer, default=0)  # Track the last log entry we've seen
+
+    # Relationships
     emblem = relationship("GuildEmblem", uselist=False, back_populates="guild", cascade="all, delete-orphan")
+    logs = relationship("GuildLog", back_populates="guild", cascade="all, delete-orphan")
+    members = relationship(
+        "GuildMember",
+        secondary=guild_memberships,
+        back_populates="guilds",
+        overlaps="guild_memberships",
+        viewonly=True,  # Make this relationship read-only since we'll write through guild_memberships
+    )
+    guild_memberships = relationship(
+        "GuildMembership",
+        back_populates="guild",
+        primaryjoin="Guild.id == GuildMembership.guild_id",
+        cascade="all, delete-orphan"
+    )
+    ranks = relationship("GuildRank", back_populates="guild", cascade="all, delete-orphan")
 
     def to_dict(self):
         """Convert the guild model to a dictionary matching the GW2 API response format."""
+        # Get member data including their rank and join date for this guild
+        member_data = []
+        for membership in self.guild_memberships:
+            display_name, full_name = split_account_name(membership.account_name)
+            member_data.append({
+                "name": display_name,
+                "full_name": full_name,
+                "rank": membership.rank,
+                "joined": membership.joined.isoformat() if membership.joined else None,
+                "wvw_member": membership.wvw_member
+            })
+
         return {
             "id": self.id,
             "name": self.name,
@@ -34,7 +68,11 @@ class Guild(Base):
             "aetherium": self.aetherium,
             "resonance": self.resonance,
             "favor": self.favor,
-            "emblem": self.emblem.to_dict() if self.emblem else None
+            "emblem": self.emblem.to_dict() if self.emblem else None,
+            "members": member_data,
+            "ranks": [rank.to_dict() for rank in self.ranks] if self.ranks else [],
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "last_log_id": self.last_log_id
         }
 
 class GuildEmblem(Base):
