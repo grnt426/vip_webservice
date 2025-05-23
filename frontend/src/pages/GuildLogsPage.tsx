@@ -103,6 +103,9 @@ interface UpgradeLog extends BaseGuildLog {
   type: 'upgrade';
   action?: string;
   upgrade_id?: number;
+  item_id?: number;
+  recipe_id?: number;
+  count?: number;
   upgrade_name?: string;
 }
 
@@ -121,7 +124,26 @@ interface RankChangeLog extends BaseGuildLog {
   new_rank?: string;
 }
 
-type GuildLog = StashLog | InvitedLog | TreasuryLog | MotdLog | UpgradeLog | JoinLog | KickLog | RankChangeLog;
+interface InfluenceLog extends BaseGuildLog {
+  type: 'influence';
+  activity?: string; // e.g., "daily_login", "gifted"
+  participants?: number;
+  total_participants?: string[]; // Should be array of strings if deserialized correctly
+}
+
+interface MissionLog extends BaseGuildLog {
+  type: 'mission';
+  state?: string; // e.g., "start", "success", "fail"
+  influence?: number; // Influence awarded
+}
+
+interface InviteDeclineLog extends BaseGuildLog {
+  type: 'invite_declined';
+  declined_by?: string;
+}
+
+type GuildLog = StashLog | InvitedLog | TreasuryLog | MotdLog | UpgradeLog | JoinLog | KickLog | RankChangeLog |
+                InfluenceLog | MissionLog | InviteDeclineLog;
 
 const LOG_TYPES = [
   'stash',
@@ -132,7 +154,9 @@ const LOG_TYPES = [
   'join',
   'kick',
   'rank_change',
-  'influence'
+  'influence',
+  'mission',
+  'invite_declined'
 ] as const;
 
 type LogType = typeof LOG_TYPES[number];
@@ -210,23 +234,45 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
   const renderLogSummary = (log: GuildLog): React.ReactNode => {
     switch (log.type) {
       case 'stash':
-        if (log.coins) return `${log.operation || 'Unknown operation'} ${log.coins.toLocaleString()} coins`;
-        return (<span>{log.operation || 'Unknown operation'} {log.count || 0} x {' '}{renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
+        if (log.coins) { return `${log.operation || 'Unknown op.'} ${log.coins.toLocaleString()} coins`; }
+        return (<span>{log.operation || 'Unknown op.'} {log.count || 0} x {renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
       case 'treasury':
-        return (<span>{log.count || 0} x {' '}{renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
-      case 'motd': return `Changed MOTD`;
-      case 'upgrade': return `${log.action || 'Unknown action'} upgrade: ${log.upgrade_name || `#${log.upgrade_id}` || 'Unknown upgrade'}`;
+        return (<span>{log.count || 0} x {renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
+      case 'motd':
+        return `Changed MOTD`;
+      case 'upgrade':
+        let upgradeIdentifier: React.ReactNode = log.upgrade_name;
+        if (!upgradeIdentifier && log.item_id) {
+          upgradeIdentifier = renderItemName(log.item_id);
+        } else if (!upgradeIdentifier && log.upgrade_id) {
+          upgradeIdentifier = `#${log.upgrade_id}`;
+        } else if (!upgradeIdentifier) {
+          upgradeIdentifier = 'Unknown upgrade';
+        }
+        return `${log.action || 'Unknown action'} upgrade: ${typeof upgradeIdentifier === 'string' ? upgradeIdentifier : ''}`;
       case 'invited': return `Invited by ${log.invited_by || 'Unknown'}`;
       case 'join': return 'Joined the guild';
       case 'kick': return `${log.user} was kicked by ${log.kicked_by || 'Unknown'}`;
       case 'rank_change': return `Rank changed from ${log.old_rank || 'Unknown'} to ${log.new_rank || 'Unknown'}`;
-      default: return 'Unknown action';
+      case 'influence':
+        const influenceActivity = log.activity === 'daily_login' ? 'Daily Login' : log.activity;
+        return `Influence: ${influenceActivity || 'Unknown'} (${log.participants || 0} participants)`;
+      case 'mission':
+        return `Mission ${log.state || 'event'}${log.influence ? ` (Influence: ${log.influence})` : ''}`;
+      case 'invite_declined':
+        return `Invite declined by ${log.declined_by || 'Unknown'}`;
+      default:
+        const unknownLog = log as any;
+        return `Unknown action: ${unknownLog.type}`;
     }
   };
 
   const detailedInfoContent = useMemo(() => {
     switch (log.type) {
       case 'stash':
+        if (log.operation === 'deposit' || log.operation === 'withdraw') {
+            return null; 
+        }
         return (
           <Box sx={{ pl: { xs: 2, sm: 4 }, py: 1 }}>
             <Typography variant="body2" component="div">
@@ -248,6 +294,30 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{log.motd || 'Empty MOTD'}</Typography>
           </Box>
         );
+      case 'influence':
+        return (
+          <Box sx={{ pl: { xs: 2, sm: 4 }, py: 1 }}>
+            <Typography variant="body2" component="div">
+              <strong>Activity:</strong> {log.activity === 'daily_login' ? 'Daily Login' : log.activity || 'Unknown'}<br />
+              <strong>Participants involved:</strong> {log.participants || 'N/A'}<br />
+              {log.total_participants && log.total_participants.length > 0 && (
+                <><strong>Participant List:</strong> {log.total_participants.join(', ')}
+                </>
+              )}
+            </Typography>
+          </Box>
+        );
+      case 'mission':
+        return (
+          <Box sx={{ pl: { xs: 2, sm: 4 }, py: 1 }}>
+            <Typography variant="body2" component="div">
+              <strong>State:</strong> {log.state || 'Unknown'}<br />
+              {log.influence !== undefined && <><strong>Influence Awarded:</strong> {log.influence}</>}
+            </Typography>
+          </Box>
+        );
+      case 'invite_declined': // No extra details beyond summary needed for this one for now.
+        return null;
       default:
         return null;
     }
@@ -402,9 +472,18 @@ const GuildLogsPage: React.FC = () => {
             <InputLabel>Filter by Type</InputLabel>
             <Select value={selectedType} label="Filter by Type" onChange={handleTypeChange}>
               <MenuItem value="">All Types</MenuItem>
-              {LOG_TYPES.map((type) => (
-                <MenuItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</MenuItem>
-              ))}
+              {LOG_TYPES.map((type) => {
+                let displayName = type.charAt(0).toUpperCase() + type.slice(1);
+                if (type === 'motd') displayName = 'MOTD';
+                if (type === 'rank_change') displayName = 'Rank Change';
+                if (type === 'invite_declined') displayName = 'Invite Declined';
+                // Add more custom display names if needed (e.g., for 'influence', 'mission')
+                return (
+                  <MenuItem key={type} value={type}>
+                    {displayName}
+                  </MenuItem>
+                );
+              })}
             </Select>
           </FormControl>
           <Tooltip title="Refresh Logs">
