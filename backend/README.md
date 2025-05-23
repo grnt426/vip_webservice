@@ -126,7 +126,7 @@ Interaction with the official Guild Wars 2 API is handled by the `GW2Client` cla
 
 ### Rate Limiting
 
--   The GW2 API has rate limits (e.g., 300 requests per 5 minutes per endpoint, or 600 requests per minute per IP).
+-   The GW2 API has rate limits (e.g., 300 requests burst, refill rate of 5 requests/second).
 -   A simple token bucket rate limiter (`TokenBucketRateLimiter` in `app/rate_limiter.py`) is *initialized* in `GW2Client` but is **not currently actively used** to throttle outgoing requests. This is a potential area for improvement if API rate limit errors become an issue during heavy data fetching.
 -   Currently, the application relies on fetching data only when stale or explicitly refreshed to avoid hitting limits too frequently.
 

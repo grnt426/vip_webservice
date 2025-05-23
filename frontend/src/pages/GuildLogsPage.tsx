@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -22,6 +22,7 @@ import {
   Chip,
   Collapse,
   CircularProgress,
+  useMediaQuery,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
@@ -146,8 +147,8 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
   const { getItem } = useItems();
   const [itemDetails, setItemDetails] = useState<Record<number, GW2Item>>({});
   const [loadingItems, setLoadingItems] = useState<Record<number, boolean>>({});
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Fetch item details when needed
   const fetchItemDetails = async (itemId: number) => {
     if (itemDetails[itemId] || loadingItems[itemId]) return;
     
@@ -162,19 +163,11 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
     }
   };
 
-  // Fetch item details immediately when the row is rendered
   useEffect(() => {
     if ((log.type === 'stash' || log.type === 'treasury') && 'item_id' in log && log.item_id) {
       fetchItemDetails(log.item_id);
     }
-  }, [log.type]);
-
-  // Keep the expanded state effect for any additional data we might want to load on expansion
-  useEffect(() => {
-    if (isExpanded) {
-      // Reserved for any future expansion-specific data loading
-    }
-  }, [isExpanded]);
+  }, [log]);
 
   const formatGuildDisplay = (log: GuildLog): string => {
     if (!log.guild_name) return 'Unknown Guild';
@@ -217,62 +210,33 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
   const renderLogSummary = (log: GuildLog): React.ReactNode => {
     switch (log.type) {
       case 'stash':
-        if (log.coins) {
-          return `${log.operation || 'Unknown operation'} ${log.coins.toLocaleString()} coins`;
-        }
-        return (
-          <span>
-            {log.operation || 'Unknown operation'} {log.count || 0} x{' '}
-            {renderItemName(log.item_id, log.item_name || 'Unknown item')}
-          </span>
-        );
+        if (log.coins) return `${log.operation || 'Unknown operation'} ${log.coins.toLocaleString()} coins`;
+        return (<span>{log.operation || 'Unknown operation'} {log.count || 0} x {' '}{renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
       case 'treasury':
-        return (
-          <span>
-            {log.count || 0} x{' '}
-            {renderItemName(log.item_id, log.item_name || 'Unknown item')}
-          </span>
-        );
-      case 'motd':
-        return `Changed MOTD`;
-      case 'upgrade':
-        return `${log.action || 'Unknown action'} upgrade: ${log.upgrade_name || `#${log.upgrade_id}` || 'Unknown upgrade'}`;
-      case 'invited':
-        return `Invited by ${log.invited_by || 'Unknown'}`;
-      case 'join':
-        return 'Joined the guild';
-      case 'kick':
-        return `${log.user} was kicked by ${log.kicked_by || 'Unknown'}`;
-      case 'rank_change':
-        return `Rank changed from ${log.old_rank || 'Unknown'} to ${log.new_rank || 'Unknown'}`;
-      default:
-        return 'Unknown action';
+        return (<span>{log.count || 0} x {' '}{renderItemName(log.item_id, log.item_name || 'Unknown item')}</span>);
+      case 'motd': return `Changed MOTD`;
+      case 'upgrade': return `${log.action || 'Unknown action'} upgrade: ${log.upgrade_name || `#${log.upgrade_id}` || 'Unknown upgrade'}`;
+      case 'invited': return `Invited by ${log.invited_by || 'Unknown'}`;
+      case 'join': return 'Joined the guild';
+      case 'kick': return `${log.user} was kicked by ${log.kicked_by || 'Unknown'}`;
+      case 'rank_change': return `Rank changed from ${log.old_rank || 'Unknown'} to ${log.new_rank || 'Unknown'}`;
+      default: return 'Unknown action';
     }
   };
 
-  const renderDetailedInfo = (log: GuildLog) => {
+  const detailedInfoContent = useMemo(() => {
     switch (log.type) {
       case 'stash':
         return (
-          <Box sx={{ pl: 4, py: 1 }}>
+          <Box sx={{ pl: { xs: 2, sm: 4 }, py: 1 }}>
             <Typography variant="body2" component="div">
               <strong>Operation:</strong> {log.operation || 'Unknown'}
               {log.coins ? (
-                <Box component="span" sx={{ ml: 2 }}>
-                  <strong>Coins:</strong> {log.coins.toLocaleString()}
-                </Box>
+                <Box component="span" sx={{ ml: 2 }}><strong>Coins:</strong> {log.coins.toLocaleString()}</Box>
               ) : (
                 <>
-                  {log.item_id && (
-                    <Box component="span" sx={{ ml: 2 }}>
-                      <strong>Item:</strong> {renderItemName(log.item_id)}
-                    </Box>
-                  )}
-                  {log.count !== undefined && (
-                    <Box component="span" sx={{ ml: 2 }}>
-                      <strong>Count:</strong> {log.count}
-                    </Box>
-                  )}
+                  {log.item_id && (<Box component="span" sx={{ ml: 2 }}><strong>Item:</strong> {renderItemName(log.item_id)}</Box>)}
+                  {log.count !== undefined && (<Box component="span" sx={{ ml: 2 }}><strong>Count:</strong> {log.count}</Box>)}
                 </>
               )}
             </Typography>
@@ -280,16 +244,19 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
         );
       case 'motd':
         return (
-          <Box sx={{ pl: 4, py: 1 }}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {log.motd || 'Empty MOTD'}
-            </Typography>
+          <Box sx={{ pl: { xs: 2, sm: 4 }, py: 1 }}>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{log.motd || 'Empty MOTD'}</Typography>
           </Box>
         );
       default:
         return null;
     }
-  };
+  }, [log, itemDetails, loadingItems]);
+
+  const hasDetails = detailedInfoContent !== null;
+
+  const cellSx = { py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } };
+  const expandCellSx = { width: { xs: '36px', sm: '48px' }, p: {xs: 0.25, sm: 0.5 }, ...cellSx, textAlign: 'center' };
 
   return (
     <>
@@ -298,22 +265,20 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
           '&:hover': { bgcolor: theme.palette.action.hover },
           cursor: 'pointer'
         }}
-        onClick={() => setIsExpanded(!isExpanded)}
       >
-        <TableCell>
-          <IconButton
-            aria-label="expand row"
-            size="small"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-          >
-            {isExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-          </IconButton>
+        <TableCell sx={expandCellSx}>
+          {hasDetails && (
+            <IconButton
+              aria-label="expand row"
+              size={isMobile ? "small" : "medium"}
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+            </IconButton>
+          )}
         </TableCell>
-        <TableCell>{new Date(log.time).toLocaleString()}</TableCell>
-        <TableCell>
+        <TableCell sx={cellSx}>{new Date(log.time).toLocaleString()}</TableCell>
+        <TableCell sx={cellSx}>
           <Chip 
             label={formatGuildDisplay(log)}
             size="small"
@@ -323,7 +288,7 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
             }}
           />
         </TableCell>
-        <TableCell>
+        <TableCell sx={cellSx}>
           <Typography 
             component="span" 
             sx={{ 
@@ -334,22 +299,25 @@ const LogRow: React.FC<LogRowProps> = ({ log, theme }) => {
             {log.type}
           </Typography>
         </TableCell>
-        <TableCell>{log.user}</TableCell>
-        <TableCell>{renderLogSummary(log)}</TableCell>
+        <TableCell sx={cellSx}>{log.user}</TableCell>
+        <TableCell sx={cellSx}>{renderLogSummary(log)}</TableCell>
       </TableRow>
-      <TableRow>
-        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
-          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-            {renderDetailedInfo(log)}
-          </Collapse>
-        </TableCell>
-      </TableRow>
+      {hasDetails && (
+        <TableRow>
+          <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
+            <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+              {detailedInfoContent}
+            </Collapse>
+          </TableCell>
+        </TableRow>
+      )}
     </>
   );
 };
 
 const GuildLogsPage: React.FC = () => {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [logs, setLogs] = useState<GuildLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -408,17 +376,16 @@ const GuildLogsPage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: {xs: 1, sm: 2, md: 3} }}>
       <Typography variant="h4" component="h1" gutterBottom>
         Guild Activity Logs
       </Typography>
 
-      {/* Search controls */}
       <Box sx={{ 
-        mb: 3,
+        mb: { xs: 1.5, sm: 2, md: 3 },
         display: 'flex',
         flexDirection: { xs: 'column', sm: 'row' },
-        gap: 2,
+        gap: 1.5,
         alignItems: { xs: 'stretch', sm: 'center' }
       }}>
         <TextField
@@ -427,68 +394,53 @@ const GuildLogsPage: React.FC = () => {
           size="small"
           value={searchUser}
           onChange={handleUserSearch}
-          sx={{ minWidth: 200 }}
+          sx={{ flexGrow: {sm: 1}, minWidth: {xs: 'auto', sm: 150} }}
         />
         
-        <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Filter by Type</InputLabel>
-          <Select
-            value={selectedType}
-            label="Filter by Type"
-            onChange={handleTypeChange}
-          >
-            <MenuItem value="">All Types</MenuItem>
-            {LOG_TYPES.map((type) => (
-              <MenuItem key={type} value={type}>
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <Tooltip title="Refresh Logs">
-          <IconButton onClick={() => fetchLogs()} color="primary">
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'nowrap'}}>
+          <FormControl size="small" sx={{ minWidth: {xs: 'calc(100% - 60px)', sm: 180}, flexGrow:1 }}>
+            <InputLabel>Filter by Type</InputLabel>
+            <Select value={selectedType} label="Filter by Type" onChange={handleTypeChange}>
+              <MenuItem value="">All Types</MenuItem>
+              {LOG_TYPES.map((type) => (
+                <MenuItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Tooltip title="Refresh Logs">
+            <IconButton onClick={() => fetchLogs()} color="primary" sx={{p:1}}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
-      {/* Error message */}
       {error && (
         <Typography color="error" sx={{ mb: 2 }}>
           {error}
         </Typography>
       )}
 
-      {/* Logs table */}
       <TableContainer 
         component={Paper} 
-        sx={{ 
-          mb: 2,
-          maxHeight: 'calc(100vh - 300px)',
-          overflow: 'auto'
-        }}
+        sx={{ mb: 2, maxHeight: 'calc(100vh - 280px)', overflow: 'auto' }}
       >
-        <Table stickyHeader>
+        <Table stickyHeader size={isMobile ? "small" : "medium"}>
           <TableHead>
             <TableRow>
-              <TableCell width="48px" /> {/* For expand/collapse icon */}
-              <TableCell>Time</TableCell>
-              <TableCell>Guild</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>User</TableCell>
-              <TableCell>Summary</TableCell>
+              <TableCell sx={{ width: { xs: '36px', sm: '48px' }, p: {xs: 0.25, sm: 0.5 }, textAlign: 'center' }} />
+              <TableCell sx={{ py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>Time</TableCell>
+              <TableCell sx={{ py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>Guild</TableCell>
+              <TableCell sx={{ py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>Type</TableCell>
+              <TableCell sx={{ py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>User</TableCell>
+              <TableCell sx={{ py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>Summary</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={6} align="center">Loading...</TableCell>
-              </TableRow>
+              <TableRow><TableCell colSpan={6} align="center">Loading...</TableCell></TableRow>
             ) : logs.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} align="center">No logs found</TableCell>
-              </TableRow>
+              <TableRow><TableCell colSpan={6} align="center">No logs found</TableCell></TableRow>
             ) : (
               logs.map((log) => (
                 <LogRow key={`${log.id}-${log.time}`} log={log} theme={theme} />
@@ -498,12 +450,7 @@ const GuildLogsPage: React.FC = () => {
         </Table>
       </TableContainer>
 
-      {/* Pagination */}
-      <Box sx={{ 
-        display: 'flex',
-        justifyContent: 'center',
-        mt: 2
-      }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
         <Pagination
           count={totalPages}
           page={page}

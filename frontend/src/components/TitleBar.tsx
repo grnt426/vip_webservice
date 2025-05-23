@@ -1,25 +1,30 @@
 import { useState } from 'react';
-import { AppBar, Box, Toolbar, Typography, IconButton, useTheme } from '@mui/material';
+import { AppBar, Box, Toolbar, Typography, IconButton, useTheme, useMediaQuery } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
+import MenuIcon from '@mui/icons-material/Menu';
 import { Menu, MenuItem } from '@mui/material';
 
-const TitleBar: React.FC = () => {
-  const theme = useTheme();
+interface TitleBarProps {
+  onMobileMenuToggle?: () => void;
+}
 
-  // Menu button.
+const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleClickSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
   };
 
-  const handleClose = () => {
+  const handleCloseSettings = () => {
     setAnchorEl(null);
   };
 
-  const handleSelect = (option: string) => {
-    console.log(`Selected: ${option}`); // Do some action eventually.
-    handleClose();
+  const handleSelectSetting = (option: string) => {
+    console.log(`Selected: ${option}`);
+    handleCloseSettings();
   };
 
   return (
@@ -34,6 +39,17 @@ const TitleBar: React.FC = () => {
         }}
       >
         <Toolbar>
+          {isMobile && onMobileMenuToggle && (
+            <IconButton
+              color="inherit"
+              aria-label="open drawer"
+              edge="start"
+              onClick={onMobileMenuToggle}
+              sx={{ mr: 2 }}
+            >
+              <MenuIcon />
+            </IconButton>
+          )}
           <Typography 
             variant="h5" 
             component="div" 
@@ -57,15 +73,15 @@ const TitleBar: React.FC = () => {
                 backgroundColor: `${theme.palette.primary.main}20`,
               },
             }}
-            aria-label="menu"
-            onClick={handleClick}
+            aria-label="settings"
+            onClick={handleClickSettings}
           >
             <SettingsIcon />
           </IconButton>
           <Menu
             anchorEl={anchorEl}
             open={Boolean(anchorEl)}
-            onClose={handleClose}
+            onClose={handleCloseSettings}
             PaperProps={{
               sx: {
                 backgroundColor: theme.palette.background.paper,
@@ -78,7 +94,7 @@ const TitleBar: React.FC = () => {
             {['Profile', 'Settings', 'Logout'].map((option) => (
               <MenuItem 
                 key={option}
-                onClick={() => handleSelect(option)}
+                onClick={() => handleSelectSetting(option)}
                 sx={{
                   '&:hover': {
                     backgroundColor: `${theme.palette.primary.main}20`,

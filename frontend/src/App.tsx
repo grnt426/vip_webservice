@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Box, Typography, CssBaseline } from '@mui/material';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { Box, Typography, CssBaseline, useMediaQuery } from '@mui/material';
+import { createTheme, ThemeProvider, useTheme } from '@mui/material/styles';
 
 import TitleBar from "./components/TitleBar";
 import SideBar from "./components/SideBar";
@@ -12,7 +12,7 @@ import GuildMembersPage from "./pages/GuildMembersPage";
 import AboutPage from "./pages/About";
 import ContactPage from "./pages/Contact";
 
-const theme = createTheme({
+const appTheme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
@@ -88,6 +88,14 @@ const theme = createTheme({
 
 const App: React.FC = () => {
   const [content, setContent] = useState('GuildDashboard');  // Set GuildDashboard as default
+  const theme = useTheme(); // Use the theme from ThemeProvider for useMediaQuery
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
+  };
+
   const renderContent = () => {
     switch (content) {
       case 'Home':
@@ -109,13 +117,33 @@ const App: React.FC = () => {
 
   return (
     <>
-      <ThemeProvider theme={theme}>
+      <ThemeProvider theme={appTheme}>
         <CssBaseline />
         <Box sx={{ display:"flex", flexDirection:"column", minHeight: '100vh', bgcolor: 'background.default' }}>
-          <TitleBar />
-          <Box sx={{ display: 'flex', flex: 1 }}>
-            <SideBar onSelect={setContent} />
-            <Box sx={{ flexGrow: 1, p: 3 }}>
+          <TitleBar onMobileMenuToggle={isMobile ? handleDrawerToggle : undefined} />
+          <Box sx={{ display: 'flex', flex: 1, mt: isMobile ? 0 : `64px` /* Account for fixed AppBar height */ }}>
+            <SideBar 
+              onSelect={(selectedPage) => {
+                setContent(selectedPage);
+                if (isMobile) {
+                  setMobileOpen(false);
+                }
+              }}
+              mobileOpen={mobileOpen} 
+              onMobileClose={handleDrawerToggle} 
+            />
+            <Box 
+              component="main" // Semantic main content area
+              sx={{ 
+                flexGrow: 1, 
+                p: 3, 
+                // ml: isMobile ? 0 : `240px` // This might not be needed if SideBar handles its own display correctly
+                width: isMobile ? '100%' : `calc(100% - 240px)` // Ensure content takes remaining width
+              }}
+            >
+              {/* Add Toolbar only if not on mobile, because mobile drawer is temporary and overlays */}
+              {/* {!isMobile && <Toolbar />} */}
+              {/* Actually, the mt on the parent Box should handle the fixed AppBar offset */}
               {renderContent()}
               <Footer />
             </Box>
