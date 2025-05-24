@@ -15,7 +15,7 @@ export function useItems(): UseItemsResult {
   const [error, setError] = useState<Error | null>(null);
   const itemService = ItemService.getInstance();
 
-  const handleRequest = async <T>(request: () => Promise<T>): Promise<T> => {
+  const handleRequest = useCallback(async <T>(request: () => Promise<T>): Promise<T> => {
     setError(null);
     setIsLoading(true);
     try {
@@ -28,19 +28,19 @@ export function useItems(): UseItemsResult {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [setIsLoading, setError]);
 
   const getItem = useCallback(async (id: number): Promise<GW2Item> => {
     return handleRequest(() => itemService.getItem(id));
-  }, []);
+  }, [itemService, handleRequest]);
 
   const getItems = useCallback(async (ids: number[]): Promise<GW2Item[]> => {
     return handleRequest(() => itemService.getItems(ids));
-  }, []);
+  }, [itemService, handleRequest]);
 
   const searchItems = useCallback(async (query: string): Promise<GW2Item[]> => {
     return handleRequest(() => itemService.searchItems(query));
-  }, []);
+  }, [itemService, handleRequest]);
 
   return {
     getItem,
