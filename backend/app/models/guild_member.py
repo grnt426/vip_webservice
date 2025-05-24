@@ -49,6 +49,9 @@ class GuildMember(Base):
         cascade="all, delete-orphan"
     )
 
+    # Relationship to the User account (one-to-one)
+    user_account = relationship("User", back_populates="guild_member", uselist=False, cascade="all, delete-orphan")
+
     def to_dict(self):
         """Convert the member to a dictionary with all guild memberships."""
         return {

@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { AppBar, Box, Toolbar, Typography, IconButton, useTheme, useMediaQuery } from '@mui/material';
-import SettingsIcon from '@mui/icons-material/Settings';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
 import { Menu, MenuItem } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
 
 interface TitleBarProps {
   onMobileMenuToggle?: () => void;
+}
+
+interface MenuOption {
+  label: string;
+  action?: string | (() => void);
+  path?: string;
 }
 
 const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
@@ -14,18 +21,20 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  const handleClickSettings = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleClickUserMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
   };
 
-  const handleCloseSettings = () => {
+  const handleCloseUserMenu = () => {
     setAnchorEl(null);
   };
 
-  const handleSelectSetting = (option: string) => {
-    console.log(`Selected: ${option}`);
-    handleCloseSettings();
-  };
+  const menuOptions: MenuOption[] = [
+    { label: 'Register', path: '/register' },
+    { label: 'Profile', action: () => console.log('Profile clicked') },
+    { label: 'Settings', action: () => console.log('Settings clicked') },
+    { label: 'Logout', action: () => console.log('Logout clicked') },
+  ];
 
   return (
     <Box sx={{ flexGrow: 1, height: '4rem' }}>
@@ -73,15 +82,15 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
                 backgroundColor: `${theme.palette.primary.main}20`,
               },
             }}
-            aria-label="settings"
-            onClick={handleClickSettings}
+            aria-label="user account menu"
+            onClick={handleClickUserMenu}
           >
-            <SettingsIcon />
+            <AccountCircleIcon />
           </IconButton>
           <Menu
             anchorEl={anchorEl}
             open={Boolean(anchorEl)}
-            onClose={handleCloseSettings}
+            onClose={handleCloseUserMenu}
             PaperProps={{
               sx: {
                 backgroundColor: theme.palette.background.paper,
@@ -91,10 +100,17 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
               }
             }}
           >
-            {['Profile', 'Settings', 'Logout'].map((option) => (
+            {menuOptions.map((option) => (
               <MenuItem 
-                key={option}
-                onClick={() => handleSelectSetting(option)}
+                key={option.label}
+                onClick={() => {
+                  if (typeof option.action === 'function') {
+                    option.action();
+                  }
+                  handleCloseUserMenu();
+                }}
+                component={option.path ? RouterLink : 'li'}
+                to={option.path}
                 sx={{
                   '&:hover': {
                     backgroundColor: `${theme.palette.primary.main}20`,
@@ -102,7 +118,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
                   },
                 }}
               >
-                {option}
+                {option.label}
               </MenuItem>
             ))}
           </Menu>

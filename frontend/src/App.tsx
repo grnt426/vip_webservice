@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Box, Typography, CssBaseline, useMediaQuery } from '@mui/material';
 import { createTheme, ThemeProvider, useTheme } from '@mui/material/styles';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toolbar } from '@mui/material';
 
 import TitleBar from "./components/TitleBar";
 import SideBar from "./components/SideBar";
@@ -11,6 +13,7 @@ import GuildLogsPage from "./pages/GuildLogsPage";
 import GuildMembersPage from "./pages/GuildMembersPage";
 import AboutPage from "./pages/About";
 import ContactPage from "./pages/Contact";
+import RegistrationPage from './pages/RegistrationPage';
 
 const appTheme = createTheme({
   palette: {
@@ -110,13 +113,15 @@ const App: React.FC = () => {
         return <AboutPage />;
       case 'Contact':
         return <ContactPage />;
+      case 'Registration':
+        return <RegistrationPage />;
       default:
         return <Typography variant="h4">Page Not Found</Typography>;
     }
   };
 
   return (
-    <>
+    <Router>
       <ThemeProvider theme={appTheme}>
         <CssBaseline />
         <Box sx={{ display:"flex", flexDirection:"column", minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -141,16 +146,17 @@ const App: React.FC = () => {
                 width: isMobile ? '100%' : `calc(100% - 240px)` // Ensure content takes remaining width
               }}
             >
-              {/* Add Toolbar only if not on mobile, because mobile drawer is temporary and overlays */}
-              {/* {!isMobile && <Toolbar />} */}
-              {/* Actually, the mt on the parent Box should handle the fixed AppBar offset */}
-              {renderContent()}
+              <Toolbar />
+              <Routes>
+                <Route path="/" element={renderContent()} />
+                <Route path="/register" element={<RegistrationPage />} />
+              </Routes>
               <Footer />
             </Box>
           </Box>
         </Box>
       </ThemeProvider>
-    </>
+    </Router>
   )
 }
 
