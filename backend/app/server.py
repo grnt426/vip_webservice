@@ -6,10 +6,11 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from sqlalchemy import inspect
+import asyncio
 
-from app.database import engine, Base, get_db
+from app.database import engine, Base, get_db, SessionLocal
 from app.api import router as api_router
-from app.api.guilds import get_guilds
+from app.api.guilds import get_guilds, _execute_guild_update_logic, GUILD_IDS, guild_update_locks, guild_update_in_progress
 from app.models.guild_logs import (
     KickLog, InviteLog, InviteDeclineLog, JoinLog, RankChangeLog,
     StashLog, TreasuryLog, MotdLog, UpgradeLog, InfluenceLog, MissionLog
@@ -64,23 +65,39 @@ if missing_tables:
         logger.error(f"  - {table}")
     raise Exception("Missing required database tables")
 
+async def warm_individual_guild(guild_id: str):
+    """Warms a single guild, ensuring lock is respected."""
+    lock = guild_update_locks[guild_id]
+    if await lock.acquire(blocking=False): # Try to acquire lock without blocking
+        logger.info(f"Warmup: Acquired lock for guild {guild_id}, starting update.")
+        guild_update_in_progress[guild_id] = True
+        db_session: Session = SessionLocal() # Create a new session
+        try:
+            await _execute_guild_update_logic(guild_id, db_session, force_refresh_logs=True)
+            logger.info(f"Warmup: Successfully updated guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Warmup: Error updating guild {guild_id}: {str(e)}", exc_info=True)
+        finally:
+            db_session.close()
+            guild_update_in_progress[guild_id] = False
+            lock.release()
+            logger.info(f"Warmup: Released lock for guild {guild_id}.")
+    else:
+        logger.info(f"Warmup: Update for guild {guild_id} already locked by another process/task, skipping.")
+
 async def warm_database():
-    """Pre-fetch guild data on startup"""
+    """Pre-fetch guild data on startup by updating each guild."""
     logger.info("Warming up database with initial guild data...")
-    try:
-        # Get database session
-        db = next(get_db())
-        # Force refresh all guild data
-        await get_guilds(force_refresh=True, db=db)
-        logger.info("Successfully warmed up database with guild data")
-    except Exception as e:
-        logger.error(f"Error warming up database: {str(e)}", exc_info=True)
-    finally:
-        db.close()
+    
+    # Create tasks for each guild to warm them up, potentially concurrently
+    # but respecting individual guild locks via warm_individual_guild
+    tasks = [warm_individual_guild(guild_id) for guild_id in GUILD_IDS]
+    await asyncio.gather(*tasks, return_exceptions=True) # return_exceptions to see all errors if any
+    
+    logger.info("Database warmup process completed.")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm up database on startup
     await warm_database()
     yield
 

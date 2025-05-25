@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func, or_
-from typing import List, Optional
+from typing import List, Optional, Dict, Callable
 from datetime import datetime
 import logging
+import asyncio
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.guild import Guild, GuildEmblem
 from app.models.guild_logs import (
     BaseGuildLog, KickLog, InviteLog, InviteDeclineLog, JoinLog, RankChangeLog,
@@ -33,208 +34,203 @@ GUILD_IDS = [
     "90EE62DE-B813-EF11-BA1F-12061042B485",  # Pips
 ]
 
-@router.get("/guilds")
-async def get_guilds(force_refresh: bool = False, db: Session = Depends(get_db)):
-    """Get all tracked guild data, refreshing from GW2 API if stale"""
-    logger.info("Processing request for guild data")
-    guilds = []
-    guild_data_map = {}  # Store guild data for membership processing
-    
-    # First pass: Create/update all guilds and their basic data
-    for guild_id in GUILD_IDS:
-        logger.info(f"Processing guild: {guild_id}")
-        # Get guild from database
-        guild = db.query(Guild).filter(Guild.id == guild_id).first()
-        
-        try:
-            # Check if we need to refresh the data
-            if not guild:
-                logger.info(f"No existing data found for guild {guild_id}")
-            elif force_refresh or gw2_client.is_data_stale(guild.last_updated):
-                logger.info(f"Data refresh needed for guild {guild_id}. Force refresh: {force_refresh}")
-            else:
-                logger.info(f"Using cached data for guild {guild_id}")
-                guilds.append(guild.to_dict())
-                continue
+# For managing concurrent updates to the same guild_id within this instance
+guild_update_locks: Dict[str, asyncio.Lock] = {
+    guild_id: asyncio.Lock() for guild_id in GUILD_IDS
+}
+# To track if an update is already scheduled/running to avoid redundant tasks
+guild_update_in_progress: Dict[str, bool] = {
+    guild_id: False for guild_id in GUILD_IDS
+}
 
-            # Start a nested transaction for this guild's updates
-            with db.begin_nested():
-                # Fetch fresh data from GW2 API
-                logger.info(f"Fetching fresh data for guild {guild_id}")
-                guild_data = await gw2_client.get_guild_data(
-                    guild_id, 
-                    # Only pass last_log_id if not doing a force refresh
-                    last_log_id=None if force_refresh else (guild.last_log_id if guild else None)
+# Helper to get a new DB session for background tasks
+def get_background_db_session():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+async def _execute_guild_update_logic(
+    guild_id: str, 
+    db: Session, # Accepts an active DB session
+    force_refresh_logs: bool = False
+):
+    """Core logic to fetch and update data for a single guild."""
+    logger.info(f"Executing update logic for guild {guild_id}. Force refresh logs: {force_refresh_logs}")
+    try:
+        guild = db.query(Guild).filter(Guild.id == guild_id).first()
+
+        current_last_log_id = None
+        if guild and not force_refresh_logs:
+            current_last_log_id = guild.last_log_id
+        
+        guild_api_data = await gw2_client.get_guild_data(
+            guild_id,
+            last_log_id=current_last_log_id
+        )
+
+        if not guild_api_data:
+            logger.warning(f"Core Logic: No data received for guild {guild_id} from API.")
+            return
+
+        with db.begin_nested():
+            if not guild:
+                guild = Guild(
+                    id=guild_api_data["id"],
+                    name=guild_api_data["name"],
+                    tag=guild_api_data["tag"],
+                    level=guild_api_data.get("level", 0),
+                    motd=guild_api_data["motd"],
+                    influence=guild_api_data["influence"],
+                    aetherium=guild_api_data["aetherium"],
+                    resonance=guild_api_data["resonance"],
+                    favor=guild_api_data["favor"],
+                    last_log_id=guild_api_data.get("last_log_id", 0)
                 )
-                
-                # If we couldn't get guild data, skip this guild
-                if not guild_data:
-                    logger.warning(f"No data received for guild {guild_id}, skipping")
-                    if guild:
-                        guilds.append(guild.to_dict())
-                    continue
-                
-                # Store guild data for later membership processing
-                guild_data_map[guild_id] = guild_data
-                
-                if not guild:
-                    # Create new guild if it doesn't exist
-                    logger.info(f"Creating new guild record for {guild_id}")
-                    guild = Guild(
-                        id=guild_data["id"],
-                        name=guild_data["name"],
-                        tag=guild_data["tag"],
-                        level=guild_data.get("level", 0),
-                        motd=guild_data["motd"],
-                        influence=guild_data["influence"],
-                        aetherium=guild_data["aetherium"],
-                        resonance=guild_data["resonance"],
-                        favor=guild_data["favor"],
-                        last_log_id=guild_data["last_log_id"]
-                    )
-                    db.add(guild)
-                    db.flush()  # Ensure guild is created before adding related data
-                
-                # Update guild data
-                guild.name = guild_data["name"]
-                guild.tag = guild_data["tag"]
-                guild.level = guild_data.get("level", 0)
-                guild.motd = guild_data["motd"]
-                guild.influence = guild_data["influence"]
-                guild.aetherium = guild_data["aetherium"]
-                guild.resonance = guild_data["resonance"]
-                guild.favor = guild_data["favor"]
-                guild.last_log_id = guild_data["last_log_id"]
-                guild.last_updated = datetime.utcnow()
+                db.add(guild)
+                db.flush()
+            
+            guild.name = guild_api_data["name"]
+            guild.tag = guild_api_data["tag"]
+            guild.level = guild_api_data.get("level", 0)
+            guild.motd = guild_api_data["motd"]
+            guild.influence = guild_api_data["influence"]
+            guild.aetherium = guild_api_data["aetherium"]
+            guild.resonance = guild_api_data["resonance"]
+            guild.favor = guild_api_data["favor"]
+            guild.last_log_id = guild_api_data.get("last_log_id", guild.last_log_id)
+            guild.last_updated = datetime.utcnow()
+            db.flush()
+
+            if guild_api_data.get("emblem"):
+                emblem_data = guild_api_data["emblem"]
+                if not guild.emblem:
+                    guild.emblem = GuildEmblem(guild_id=guild.id)
+                guild.emblem.background_id = emblem_data["background"]["id"]
+                guild.emblem.background_colors = emblem_data["background"]["colors"]
+                guild.emblem.foreground_id = emblem_data["foreground"]["id"]
+                guild.emblem.foreground_colors = emblem_data["foreground"]["colors"]
+                guild.emblem.flags = emblem_data.get("flags", [])
+                db.flush()
+            
+            if guild_api_data.get("logs"):
+                new_logs_count = 0
+                for log_entry_data in guild_api_data["logs"]:
+                    log_type = log_entry_data["type"]
+                    if log_type not in LOG_TYPE_MAP:
+                        logger.warning(f"Core Logic: Unknown log type: {log_type} for guild {guild_id}")
+                        continue
+                    log_model_cls = LOG_TYPE_MAP[log_type]
+                    existing_log = db.query(log_model_cls).filter_by(guild_id=guild_id, id=log_entry_data["id"]).first()
+                    if not existing_log:
+                        new_log = create_log_entry(guild_id, log_entry_data)
+                        db.add(new_log)
+                        new_logs_count += 1
+                if new_logs_count > 0:
+                    logger.info(f"Core Logic: Added {new_logs_count} new logs for guild {guild_id}")
                 db.flush()
 
-                # Process emblem
-                if guild_data.get("emblem"):
-                    logger.info(f"Processing emblem for guild {guild_id}")
-                    emblem_data = guild_data["emblem"]
-                    if not guild.emblem:
-                        guild.emblem = GuildEmblem()
-                    guild.emblem.background_id = emblem_data["background"]["id"]
-                    guild.emblem.background_colors = emblem_data["background"]["colors"]
-                    guild.emblem.foreground_id = emblem_data["foreground"]["id"]
-                    guild.emblem.foreground_colors = emblem_data["foreground"]["colors"]
-                    guild.emblem.flags = emblem_data.get("flags", [])
-                    db.flush()
-                
-                # Process new log entries
-                if guild_data.get("logs"):
-                    logger.info(f"Processing {len(guild_data['logs'])} new log entries for guild {guild_id}")
-                    new_logs_count = 0
-                    for log_entry in guild_data["logs"]:
-                        # Get the appropriate log model class for this type
-                        log_type = log_entry["type"]
-                        if log_type not in LOG_TYPE_MAP:
-                            logger.warning(f"Unknown log type: {log_type}")
-                            continue
-                            
-                        log_model = LOG_TYPE_MAP[log_type]
-                        
-                        # Check if log entry already exists
-                        existing_log = db.query(log_model).filter(
-                            log_model.guild_id == guild_id,
-                            log_model.id == log_entry["id"]
-                        ).first()
-                        
-                        if not existing_log:
-                            new_log = create_log_entry(guild_id, log_entry)
-                            db.add(new_log)
-                            new_logs_count += 1
-                    
-                    logger.info(f"Added {new_logs_count} new logs for guild {guild_id}")
-                    db.flush()
+            if guild_api_data.get("ranks"):
+                existing_ranks = {rank.id: rank for rank in db.query(GuildRank).filter_by(guild_id=guild_id).all()}
+                processed_rank_ids = set()
+                for rank_data in guild_api_data["ranks"]:
+                    rank_id = rank_data["id"]
+                    processed_rank_ids.add(rank_id)
+                    rank = existing_ranks.get(rank_id)
+                    if rank:
+                        rank.order = rank_data["order"]
+                        rank.permissions = rank_data["permissions"]
+                        rank.icon = rank_data.get("icon")
+                    else:
+                        rank = GuildRank.from_api_response(guild_id, rank_data)
+                        db.add(rank)
+                for rank_id_to_delete in set(existing_ranks.keys()) - processed_rank_ids:
+                    db.delete(existing_ranks[rank_id_to_delete])
+                db.flush()
 
-                # Process ranks first (since members reference ranks)
-                if guild_data.get("ranks"):
-                    logger.info(f"Processing {len(guild_data['ranks'])} ranks")
-                    # Get existing ranks
-                    existing_ranks = {
-                        rank.id: rank for rank in 
-                        db.query(GuildRank).filter(GuildRank.guild_id == guild_id).all()
-                    }
-                    
-                    # Track which ranks still exist
-                    processed_ranks = set()
-                    
-                    # Update existing ranks or create new ones
-                    for rank_data in guild_data["ranks"]:
-                        rank_id = rank_data["id"]
-                        processed_ranks.add(rank_id)
-                        
-                        if rank_id in existing_ranks:
-                            # Update existing rank
-                            rank = existing_ranks[rank_id]
-                            rank.order = rank_data["order"]
-                            rank.permissions = rank_data["permissions"]
-                            rank.icon = rank_data.get("icon")
-                        else:
-                            # Add new rank
-                            rank = GuildRank.from_api_response(guild_id, rank_data)
-                            db.add(rank)
-                    
-                    # Remove ranks that no longer exist in the API response
-                    for rank_id, rank in existing_ranks.items():
-                        if rank_id not in processed_ranks:
-                            db.delete(rank)
-                    
-                    db.flush()
+            if guild_api_data.get("members"):
+                for member_data in guild_api_data["members"]:
+                    GuildMember.add_guild_membership(db, member_data["name"], guild_id, member_data)
+                db.flush()
+        
+        db.commit()
+        logger.info(f"Core Logic: Update completed successfully for guild {guild_id}")
 
-            # If we get here, the nested transaction was successful
-            db.commit()
-            logger.info(f"Successfully processed basic data for guild {guild_id}")
-            
-        except Exception as e:
-            logger.error(f"Error processing guild {guild_id}: {str(e)}", exc_info=True)
-            db.rollback()
-            if guild:
-                # Return cached data if available
-                logger.info(f"Falling back to cached data for guild {guild_id}")
-                guilds.append(guild.to_dict())
-    
-    # Second pass: Process all memberships after all guilds exist
-    if guild_data_map:
+    except Exception as e:
+        logger.error(f"Core Logic Error for guild {guild_id}: {str(e)}", exc_info=True)
+        db.rollback()
+        raise # Re-raise the exception so the caller (background task or warm_database) can know
+
+async def _update_guild_data_background(
+    guild_id: str, 
+    force_refresh_logs: bool = False
+):
+    """Background task wrapper to fetch and update guild data, managing lock and DB session."""
+    lock = guild_update_locks[guild_id]
+    if lock.locked():
+        logger.info(f"Update for guild {guild_id} is already in progress (lock held), skipping new background task initiation.")
+        return
+
+    async with lock:
+        logger.info(f"Background task acquired lock for guild {guild_id}. Force refresh logs: {force_refresh_logs}")
+        guild_update_in_progress[guild_id] = True
+        db_gen = get_background_db_session()
+        db: Session = next(db_gen)
         try:
-            logger.info("Processing all guild memberships")
-            with db.begin_nested():
-                for guild_id, guild_data in guild_data_map.items():
-                    if guild_data.get("members"):
-                        logger.info(f"Processing {len(guild_data['members'])} members for guild {guild_id}")
-                        # Process members in batches to avoid memory issues
-                        batch_size = 50
-                        members_data = guild_data["members"]
-                        
-                        for i in range(0, len(members_data), batch_size):
-                            batch = members_data[i:i + batch_size]
-                            for member_data in batch:
-                                GuildMember.add_guild_membership(db, member_data["name"], guild_id, member_data)
-                            db.flush()
-            
-            db.commit()
-            logger.info("Successfully processed all guild memberships")
-            
-            # Now get the final guild data for the response
-            guilds = []
-            for guild_id in guild_data_map.keys():
-                guild = db.query(Guild).filter(Guild.id == guild_id).first()
-                if guild:
-                    guilds.append(guild.to_dict())
-                else:
-                    logger.error(f"Guild {guild_id} not found in database after processing")
+            await _execute_guild_update_logic(guild_id, db, force_refresh_logs)
+            logger.info(f"Background task completed successfully for guild {guild_id} via _execute_guild_update_logic.")
         except Exception as e:
-            logger.error(f"Error processing guild memberships: {str(e)}", exc_info=True)
-            db.rollback()
-            # Fall back to cached data for all guilds
-            guilds = [
-                db.query(Guild).filter(Guild.id == guild_id).first().to_dict()
-                for guild_id in guild_data_map.keys()
-            ]
+            # Logging is already done in _execute_guild_update_logic
+            logger.error(f"Background task for guild {guild_id} encountered an error: {str(e)}")
+        finally:
+            db.close()
+            guild_update_in_progress[guild_id] = False
+            logger.info(f"Background task finished for guild {guild_id}, lock released.")
+
+@router.get("/guilds")
+async def get_guilds(
+    background_tasks: BackgroundTasks,
+    force_refresh: bool = False, 
+    db: Session = Depends(get_db)
+):
+    """Get all tracked guild data, returning cached data immediately 
+       and scheduling background updates if needed."""
+    logger.info(f"Processing request for guild data. Force refresh: {force_refresh}")
+    guilds_response = []
     
-    logger.info(f"Returning data for {len(guilds)} guilds")
-    return guilds
+    for guild_id in GUILD_IDS:
+        guild = db.query(Guild).options(joinedload(Guild.emblem)).filter(Guild.id == guild_id).first()
+        
+        if guild:
+            guilds_response.append(guild.to_dict())
+            logger.info(f"Guild {guild_id} found in cache. Last updated: {guild.last_updated}")
+        else:
+            logger.info(f"Guild {guild_id} not found in cache. Initial fetch will be in background.")
+            # Optionally, add a placeholder or skip for now
+            # guilds_response.append({"id": guild_id, "name": "Fetching...", "status": "pending"})
+
+        needs_refresh = not guild or force_refresh or gw2_client.is_data_stale(guild.last_updated if guild else None)
+
+        if needs_refresh:
+            if not guild_update_locks[guild_id].locked():
+                if not guild_update_in_progress[guild_id]: # Check if already scheduled by another request in this instance
+                    logger.info(f"Scheduling background update for guild {guild_id}. Force refresh logs: {force_refresh}")
+                    guild_update_in_progress[guild_id] = True # Mark as scheduled/in-progress
+                    background_tasks.add_task(
+                        _update_guild_data_background, 
+                        guild_id=guild_id,
+                        force_refresh_logs=force_refresh # Pass force_refresh to control log fetching behavior
+                    )
+                else:
+                    logger.info(f"Background update for guild {guild_id} is already scheduled/in progress by another request.")
+            else:
+                logger.info(f"Background update for guild {guild_id} is actively being processed (lock held). Not scheduling another.")
+        elif guild: # Only log if not needing refresh and guild exists
+             logger.info(f"Cached data for guild {guild_id} is fresh. No background update scheduled.")
+
+    logger.info(f"Returning {len(guilds_response)} guilds immediately.")
+    return guilds_response
 
 @router.get("/guilds/{guild_id}/logs")
 async def get_guild_logs(
