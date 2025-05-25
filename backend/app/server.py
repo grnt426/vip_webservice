@@ -66,27 +66,38 @@ if missing_tables:
     raise Exception("Missing required database tables")
 
 async def warm_individual_guild(guild_id: str):
-    """Warms a single guild, ensuring lock is respected."""
+    """Warms a single guild, ensuring the update is attempted by acquiring the lock."""
     lock = guild_update_locks[guild_id]
-    if await lock.acquire(blocking=False): # Try to acquire lock without blocking
-        logger.info(f"Warmup: Acquired lock for guild {guild_id}, starting update.")
+    
+    logger.info(f"Warmup: Attempting to acquire lock for guild {guild_id} for initial data population.")
+    # Using 'async with lock' ensures the lock is acquired (blocking) and released properly.
+    # This will make the task wait if the lock is somehow already held, ensuring the update is attempted.
+    async with lock:
+        logger.info(f"Warmup: Acquired lock for guild {guild_id}. Starting data update (force_refresh_logs=True).")
+        
+        # Mark as in progress for the duration of this locked operation.
         guild_update_in_progress[guild_id] = True
-        db_session: Session = SessionLocal() # Create a new session
+        
+        db_session: SessionLocal = SessionLocal()
         try:
+            # force_refresh_logs=True is crucial for the initial population as requested.
             await _execute_guild_update_logic(guild_id, db_session, force_refresh_logs=True)
-            logger.info(f"Warmup: Successfully updated guild {guild_id}")
+            logger.info(f"Warmup: Successfully updated data for guild {guild_id}.")
         except Exception as e:
-            logger.error(f"Warmup: Error updating guild {guild_id}: {str(e)}", exc_info=True)
+            # Log detailed error to help diagnose issues with data population.
+            logger.error(f"Warmup: Error updating guild {guild_id} during initial population: {str(e)}", exc_info=True)
+            # Depending on policy, one might want to re-raise to halt startup if a guild fails.
+            # For now, it logs the error and continues with other guilds, aligning with current gather behavior.
         finally:
-            db_session.close()
+            if db_session: # Ensure session is closed regardless of outcome
+                db_session.close()
+            # Reset the progress flag after the operation.
             guild_update_in_progress[guild_id] = False
-            lock.release()
-            logger.info(f"Warmup: Released lock for guild {guild_id}.")
-    else:
-        logger.info(f"Warmup: Update for guild {guild_id} already locked by another process/task, skipping.")
+            # Lock is automatically released by 'async with' context exit.
+            logger.info(f"Warmup: Lock for guild {guild_id} released after initial population attempt.")
 
 async def warm_database():
-    """Pre-fetch guild data on startup by updating each guild."""
+    """Pre-fetch guild data on startup by updating each guild sequentially by lock, but tasks gathered."""
     logger.info("Warming up database with initial guild data...")
     
     # Create tasks for each guild to warm them up, potentially concurrently
