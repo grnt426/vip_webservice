@@ -28,6 +28,7 @@ class Account(Base):
     memberships = relationship("GuildMembership", back_populates="account", cascade="all, delete-orphan")
     user = relationship("User", back_populates="account", uselist=False, cascade="all, delete-orphan")
     mod_actions = relationship("ModAction", back_populates="account", order_by="ModAction.created_at.desc()")
+    standing = relationship("GuildStanding", back_populates="account", uselist=False, cascade="all, delete-orphan")
     
     @property
     def is_banned(self) -> bool:
@@ -66,6 +67,20 @@ class Account(Base):
                 }
         return {"is_banned": False}
     
+    @property
+    def current_points(self) -> int:
+        """Get current point total."""
+        if not self.standing:
+            return 0
+        return self.standing.current_points
+    
+    @property
+    def is_disabled(self) -> bool:
+        """Check if account is disabled due to points."""
+        if not self.standing:
+            return False
+        return self.standing.is_disabled
+    
     def to_dict(self):
         """Convert the account to a dictionary."""
         return {
@@ -75,6 +90,8 @@ class Account(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "is_banned": self.is_banned,
+            "is_disabled": self.is_disabled,
+            "current_points": self.current_points,
             "name_history": [history.to_dict() for history in self.name_history],
             "guilds": [{
                 "id": membership.guild_id,
@@ -101,6 +118,12 @@ class Account(Base):
                 valid_from=account.created_at
             )
             db_session.add(history_entry)
+            
+            # Create initial standing
+            from .guild_standing import GuildStanding
+            standing = GuildStanding(account_id=account.id)
+            db_session.add(standing)
+            
             db_session.flush()
             
         return account

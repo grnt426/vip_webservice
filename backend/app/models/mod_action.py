@@ -20,6 +20,11 @@ class ModAction(Base):
     action_type = Column(String, nullable=False, index=True)  # "ban", "temp_ban", "warning", "kick", "mute", etc.
     severity = Column(Integer, default=1)  # 1-5 scale for escalation tracking
     
+    # Points system
+    points_added = Column(Integer, nullable=True)  # Points added by this action
+    violation_type = Column(String, nullable=True)  # Type of violation (maps to point values)
+    auto_disabled_account = Column(Boolean, default=False)  # If this action caused auto-disable
+    
     reason = Column(String, nullable=False)
     details = Column(Text, nullable=True)  # Additional context
     
@@ -48,6 +53,9 @@ class ModAction(Base):
             "account_name": self.account_name,
             "action_type": self.action_type,
             "severity": self.severity,
+            "points_added": self.points_added,
+            "violation_type": self.violation_type,
+            "auto_disabled_account": self.auto_disabled_account,
             "reason": self.reason,
             "details": self.details,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -82,4 +90,4 @@ class ModAction(Base):
         self.lifted_by_user_id = lifted_by_user_id
     
     def __repr__(self):
-        return f"<ModAction(id={self.id}, account='{self.account_name}', type='{self.action_type}', active={self.is_active})>" 
+        return f"<ModAction(id={self.id}, account='{self.account_name}', type='{self.action_type}', points={self.points_added}, active={self.is_active})>" 
