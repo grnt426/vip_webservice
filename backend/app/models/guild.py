@@ -3,7 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 
 from app.database import Base
-from .guild_member import guild_memberships, GuildMembership
+from .guild_membership import guild_memberships, GuildMembership
 from app.utils.name_utils import split_account_name, get_short_guild_name
 from .guild_logs import (
     KickLog, InviteLog, InviteDeclineLog, JoinLog, RankChangeLog,
@@ -46,13 +46,7 @@ class Guild(Base):
     influence_logs = relationship(InfluenceLog, back_populates="guild", cascade="all, delete-orphan")
     mission_logs = relationship(MissionLog, back_populates="guild", cascade="all, delete-orphan")
     
-    members = relationship(
-        "GuildMember",
-        secondary=guild_memberships,
-        back_populates="guilds",
-        overlaps="guild_memberships",
-        viewonly=True,  # Make this relationship read-only since we'll write through guild_memberships
-    )
+    # Direct access to membership data
     guild_memberships = relationship(
         "GuildMembership",
         back_populates="guild",
@@ -66,10 +60,13 @@ class Guild(Base):
         # Get member data including their rank and join date for this guild
         member_data = []
         for membership in self.guild_memberships:
-            display_name, full_name = split_account_name(membership.account_name)
+            # Access the account through the membership
+            account = membership.account
+            display_name, full_name = split_account_name(account.current_account_name)
             member_data.append({
                 "name": display_name,
                 "full_name": full_name,
+                "account_id": account.id,  # Include the internal ID
                 "rank": membership.rank,
                 "joined": membership.joined.isoformat() if membership.joined else None,
                 "wvw_member": membership.wvw_member

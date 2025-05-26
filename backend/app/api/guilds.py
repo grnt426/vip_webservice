@@ -13,7 +13,8 @@ from app.models.guild_logs import (
     StashLog, TreasuryLog, MotdLog, UpgradeLog, InfluenceLog, MissionLog,
     create_log_entry, LOG_TYPE_MAP
 )
-from app.models.guild_member import GuildMember, guild_memberships
+from app.models.account import Account
+from app.models.guild_membership import GuildMembership, guild_memberships
 from app.models.guild_rank import GuildRank
 from app.gw2_client import GW2Client
 from app.utils.name_utils import get_short_guild_name
@@ -151,7 +152,10 @@ async def _execute_guild_update_logic(
 
             if guild_api_data.get("members"):
                 for member_data in guild_api_data["members"]:
-                    GuildMember.add_guild_membership(db, member_data["name"], guild_id, member_data)
+                    # Get or create the account
+                    account = Account.get_or_create(db, member_data["name"])
+                    # Add or update the guild membership
+                    GuildMembership.add_or_update(db, account.id, guild_id, member_data)
                 db.flush()
         
         db.commit()

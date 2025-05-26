@@ -92,19 +92,19 @@ async def _get_gw2_account_and_permissions(api_key: str, gw2_client: GW2Client) 
 
     return account_name, permissions, account_id
 
-async def _get_validated_guild_member_from_api_key(
+async def _get_validated_account_from_api_key(
     api_key: str, 
     db: Session, 
     gw2_client: GW2Client,
     check_existing_user: bool = True,
     expected_account_name: Optional[str] = None
-) -> models.GuildMember:
-    # Use the new helper function
+) -> models.Account:
+    # Use the helper function to get account details
     actual_account_name, permissions, _ = await _get_gw2_account_and_permissions(api_key, gw2_client)
 
     # The rest of the logic uses actual_account_name (which is the in-game name)
     if not actual_account_name:
-        # This case should be caught by the new helper, but as a safeguard:
+        # This case should be caught by the helper, but as a safeguard:
         logger.warning(f"API key validation failed: No actual account name returned. API Key ending: ...{api_key[-4:]}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
@@ -128,25 +128,33 @@ async def _get_validated_guild_member_from_api_key(
     
     logger.info(f"API key validated for account '{actual_account_name}' with sufficient permissions. Checking database...")
 
-    guild_member = db.query(models.GuildMember).filter(models.GuildMember.name == actual_account_name).first()
-    if not guild_member:
-        logger.warning(f"API key validation failed for account '{actual_account_name}': No GuildMember found in DB with this name. API Key ending: ...{api_key[-4:]}")
+    # Check if the account exists in our database
+    account = db.query(models.Account).filter(models.Account.current_account_name == actual_account_name).first()
+    if not account:
+        logger.warning(f"API key validation failed for account '{actual_account_name}': No Account found in DB with this name. API Key ending: ...{api_key[-4:]}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No guild member found in our database with the account name '{actual_account_name}' associated with this API key. Please ensure you are a member of the registered guild and your account name matches exactly (e.g., Name.1234)."
+            detail=f"No account found in our database with the name '{actual_account_name}'. Please ensure you are a member of a registered guild and your account has been scanned."
+        )
+
+    # Check if the account has any guild memberships
+    if not account.memberships:
+        logger.warning(f"API key validation failed for account '{actual_account_name}': Account exists but has no guild memberships. API Key ending: ...{api_key[-4:]}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Account '{actual_account_name}' exists but is not a member of any registered guilds."
         )
 
     if check_existing_user:
-        existing_user = db.query(models.User).filter(models.User.guild_member_name == guild_member.name).first()
-        if existing_user:
-            logger.warning(f"API key validation failed for account '{actual_account_name}': GuildMember already has a user account. API Key ending: ...{api_key[-4:]}")
+        if account.user:
+            logger.warning(f"API key validation failed for account '{actual_account_name}': Account already has a user registration. API Key ending: ...{api_key[-4:]}")
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"A user account already exists for guild member '{guild_member.name}'."
+                detail=f"A user account already exists for '{actual_account_name}'."
             )
     
-    logger.info(f"GuildMember '{actual_account_name}' found in DB and eligible (or existence check skipped).")
-    return guild_member
+    logger.info(f"Account '{actual_account_name}' found in DB and eligible (or existence check skipped).")
+    return account
 
 @router.post("/validate-api-key", response_model=user_schemas.APIKeyValidateResponse)
 async def validate_api_key(
@@ -154,15 +162,15 @@ async def validate_api_key(
     db: Session = Depends(get_db),
     gw2_client: GW2Client = Depends(GW2Client)
 ):
-    guild_member = await _get_validated_guild_member_from_api_key(
+    account = await _get_validated_account_from_api_key(
         api_key=payload.api_key, 
         db=db, 
         gw2_client=gw2_client,
         check_existing_user=True
     )
     return user_schemas.APIKeyValidateResponse(
-        username=guild_member.name, 
-        message="API key is valid and guild member is eligible for registration."
+        username=account.current_account_name, 
+        message="API key is valid and account is eligible for registration."
     )
 
 @router.post("/register", response_model=user_schemas.UserResponse)
@@ -171,7 +179,7 @@ async def register_user(
     db: Session = Depends(get_db),
     gw2_client: GW2Client = Depends(GW2Client)
 ):
-    guild_member = await _get_validated_guild_member_from_api_key(
+    account = await _get_validated_account_from_api_key(
         api_key=payload.api_key,
         db=db,
         gw2_client=gw2_client,
@@ -180,8 +188,8 @@ async def register_user(
     )
 
     new_user = models.User(
-        username=guild_member.name, 
-        guild_member_name=guild_member.name
+        username=account.current_account_name, 
+        account_id=account.id
     )
     new_user.set_password(payload.password)
     new_user.set_api_key(payload.api_key)

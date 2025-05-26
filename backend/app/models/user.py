@@ -15,8 +15,8 @@ class User(Base):
     # SHA-256 hash of the API key, must be unique
     api_key_hash = Column(String, unique=True, nullable=False)
     
-    # Link to the GuildMember, ensuring one User per GuildMember
-    guild_member_name = Column(String, ForeignKey('guild_members.name', ondelete='CASCADE'), unique=True, nullable=False)
+    # Link to the Account, ensuring one User per Account
+    account_id = Column(Integer, ForeignKey('accounts.id', ondelete='CASCADE'), unique=True, nullable=False)
     
     roles = Column(JSON, nullable=False, default=list)  # e.g., ['admin', 'officer']
     
@@ -25,8 +25,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False) # Site-level superuser
 
-    # Relationship to GuildMember
-    guild_member = relationship("GuildMember", back_populates="user_account")
+    # Relationship to Account
+    account = relationship("Account", back_populates="user")
 
     def set_password(self, password: str):
         """Hashes the password using bcrypt and stores it."""
@@ -47,7 +47,8 @@ class User(Base):
             "id": self.id,
             "username": self.username,
             "roles": self.roles,
-            "guild_member_name": self.guild_member_name,
+            "account_id": self.account_id,
+            "account_name": self.account.current_account_name if self.account else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "is_active": self.is_active,
@@ -55,4 +56,4 @@ class User(Base):
         }
 
     def __repr__(self):
-        return f"<User(username='{self.username}', guild_member_name='{self.guild_member_name}')>" 
+        return f"<User(username='{self.username}', account_id={self.account_id})>" 

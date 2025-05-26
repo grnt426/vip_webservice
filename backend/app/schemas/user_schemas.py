@@ -17,7 +17,6 @@ class UserResponse(BaseModel):
     id: int
     username: str
     roles: List[str]
-    guild_member_name: str
     is_active: bool
     is_superuser: bool
 
