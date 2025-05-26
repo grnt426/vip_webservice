@@ -9,6 +9,7 @@ from .guild_logs import (
     RankChangeLog, StashLog, TreasuryLog, MotdLog, UpgradeLog, 
     InfluenceLog, MissionLog, LOG_TYPE_MAP, create_log_entry
 )
+from .mod_action import ModAction
 from .user import User
 
 # This ensures all models are imported when the models package is imported
@@ -34,5 +35,6 @@ __all__ = [
     'MissionLog',
     'LOG_TYPE_MAP',
     'create_log_entry',
+    'ModAction',
     'User'
 ] 

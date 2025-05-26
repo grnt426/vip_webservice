@@ -16,6 +16,9 @@ class Account(Base):
     # Current account name (e.g. "Lawton Campbell.9413")
     current_account_name = Column(String, unique=True, index=True, nullable=False)
     
+    # How this account was added to the system
+    account_source = Column(String, default="guild_sync")  # "guild_sync", "moderation", "api_key"
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -24,14 +27,54 @@ class Account(Base):
     name_history = relationship("AccountNameHistory", back_populates="account", cascade="all, delete-orphan")
     memberships = relationship("GuildMembership", back_populates="account", cascade="all, delete-orphan")
     user = relationship("User", back_populates="account", uselist=False, cascade="all, delete-orphan")
+    mod_actions = relationship("ModAction", back_populates="account", order_by="ModAction.created_at.desc()")
+    
+    @property
+    def is_banned(self) -> bool:
+        """Check if account has any active ban."""
+        if not self.mod_actions:
+            return False
+        
+        for action in self.mod_actions:
+            if action.is_blocking:
+                return True
+        return False
+    
+    @property
+    def active_punishments(self):
+        """Get all active punishments."""
+        if not self.mod_actions:
+            return []
+        
+        return [
+            action for action in self.mod_actions
+            if action.is_active and not action.is_expired
+        ]
+    
+    @property
+    def ban_info(self):
+        """Get current ban information if banned."""
+        for action in self.mod_actions:
+            if action.is_blocking:
+                return {
+                    "is_banned": True,
+                    "ban_type": action.action_type,
+                    "reason": action.reason,
+                    "expires_at": action.expires_at,
+                    "created_at": action.created_at,
+                    "created_by": action.created_by.username if action.created_by else None
+                }
+        return {"is_banned": False}
     
     def to_dict(self):
         """Convert the account to a dictionary."""
         return {
             "id": self.id,
             "current_account_name": self.current_account_name,
+            "account_source": self.account_source,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_banned": self.is_banned,
             "name_history": [history.to_dict() for history in self.name_history],
             "guilds": [{
                 "id": membership.guild_id,
@@ -42,11 +85,11 @@ class Account(Base):
         }
     
     @classmethod
-    def get_or_create(cls, db_session, account_name: str):
+    def get_or_create(cls, db_session, account_name: str, source: str = "guild_sync"):
         """Get an existing account by name or create a new one."""
         account = db_session.query(cls).filter(cls.current_account_name == account_name).first()
         if not account:
-            account = cls(current_account_name=account_name)
+            account = cls(current_account_name=account_name, account_source=source)
             db_session.add(account)
             db_session.flush()
             
