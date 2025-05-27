@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppBar, Box, Toolbar, Typography, IconButton, useTheme, useMediaQuery } from '@mui/material';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import MenuIcon from '@mui/icons-material/Menu';
 import { Menu, MenuItem } from '@mui/material';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 
 interface TitleBarProps {
   onMobileMenuToggle?: () => void;
@@ -13,13 +13,55 @@ interface MenuOption {
   label: string;
   action?: string | (() => void);
   path?: string;
+  requiresAuth?: boolean;
+  hideWhenAuth?: boolean;
+}
+
+interface User {
+  id: number;
+  username: string;
+  is_active: boolean;
+  is_superuser: boolean;
+  account_id: number;
+  roles: string[];
 }
 
 const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
   const theme = useTheme();
+  const navigate = useNavigate();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [user, setUser] = useState<User | null>(null);
+
+  const checkUserAuth = () => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Error parsing stored user data:', e);
+        setUser(null);
+      }
+    } else {
+      setUser(null);
+    }
+  };
+
+  useEffect(() => {
+    // Check for user data in localStorage on mount
+    checkUserAuth();
+
+    // Listen for storage events (from other tabs/windows)
+    window.addEventListener('storage', checkUserAuth);
+
+    // Listen for custom auth events (from same tab)
+    window.addEventListener('auth-changed', checkUserAuth);
+
+    return () => {
+      window.removeEventListener('storage', checkUserAuth);
+      window.removeEventListener('auth-changed', checkUserAuth);
+    };
+  }, []);
 
   const handleClickUserMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
@@ -29,12 +71,35 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
     setAnchorEl(null);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    handleCloseUserMenu();
+    navigate('/');
+    // Dispatch custom event for auth change
+    window.dispatchEvent(new Event('auth-changed'));
+  };
+
   const menuOptions: MenuOption[] = [
-    { label: 'Register', path: '/register' },
-    { label: 'Profile', action: () => console.log('Profile clicked') },
-    { label: 'Settings', action: () => console.log('Settings clicked') },
-    { label: 'Logout', action: () => console.log('Logout clicked') },
+    { label: 'Login', path: '/login', hideWhenAuth: true },
+    { label: 'Register', path: '/register', hideWhenAuth: true },
+    { label: 'Profile', path: '/profile', requiresAuth: true },
+    { label: 'Settings', path: '/settings', requiresAuth: true },
+    { 
+      label: 'Logout', 
+      action: handleLogout,
+      requiresAuth: true 
+    },
   ];
+
+  // Filter menu options based on auth state
+  const filteredMenuOptions = menuOptions.filter(option => {
+    if (user) {
+      return !option.hideWhenAuth;
+    }
+    return !option.requiresAuth;
+  });
 
   return (
     <Box sx={{ flexGrow: 1, height: '4rem' }}>
@@ -73,20 +138,28 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
             VIP Guild Client Dashboard
           </Typography>
 
-          <IconButton
-            size="large"
-            sx={{
-              color: theme.palette.text.secondary,
-              '&:hover': {
-                color: theme.palette.primary.main,
-                backgroundColor: `${theme.palette.primary.main}20`,
-              },
-            }}
-            aria-label="user account menu"
-            onClick={handleClickUserMenu}
-          >
-            <AccountCircleIcon />
-          </IconButton>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {user && (
+              <Typography variant="body2" sx={{ mr: 2, color: theme.palette.text.secondary }}>
+                {user.username}
+              </Typography>
+            )}
+            <IconButton
+              size="large"
+              sx={{
+                color: theme.palette.text.secondary,
+                '&:hover': {
+                  color: theme.palette.primary.main,
+                  backgroundColor: `${theme.palette.primary.main}20`,
+                },
+              }}
+              aria-label="user account menu"
+              onClick={handleClickUserMenu}
+            >
+              <AccountCircleIcon />
+            </IconButton>
+          </Box>
+          
           <Menu
             anchorEl={anchorEl}
             open={Boolean(anchorEl)}
@@ -100,7 +173,7 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
               }
             }}
           >
-            {menuOptions.map((option) => (
+            {filteredMenuOptions.map((option) => (
               <MenuItem 
                 key={option.label}
                 onClick={() => {
@@ -126,6 +199,6 @@ const TitleBar: React.FC<TitleBarProps> = ({ onMobileMenuToggle }) => {
       </AppBar>
     </Box>
   );
-}
+};
 
 export default TitleBar;

@@ -18,6 +18,7 @@ from app.models.guild_membership import GuildMembership, guild_memberships
 from app.models.guild_rank import GuildRank
 from app.gw2_client import GW2Client
 from app.utils.name_utils import get_short_guild_name
+from app.api.lottery import process_lottery_entry
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def get_background_db_session():
 
 async def _execute_guild_update_logic(
     guild_id: str, 
-    db: Session, # Accepts an active DB session
+    db: Session,
     force_refresh_logs: bool = False
 ):
     """Core logic to fetch and update data for a single guild."""
@@ -75,88 +76,122 @@ async def _execute_guild_update_logic(
             logger.warning(f"Core Logic: No data received for guild {guild_id} from API.")
             return
 
-        with db.begin_nested():
-            if not guild:
-                guild = Guild(
-                    id=guild_api_data["id"],
-                    name=guild_api_data["name"],
-                    tag=guild_api_data["tag"],
-                    level=guild_api_data.get("level", 0),
-                    motd=guild_api_data["motd"],
-                    influence=guild_api_data["influence"],
-                    aetherium=guild_api_data["aetherium"],
-                    resonance=guild_api_data["resonance"],
-                    favor=guild_api_data["favor"],
-                    last_log_id=guild_api_data.get("last_log_id", 0)
-                )
-                db.add(guild)
-                db.flush()
-            
-            guild.name = guild_api_data["name"]
-            guild.tag = guild_api_data["tag"]
-            guild.level = guild_api_data.get("level", 0)
-            guild.motd = guild_api_data["motd"]
-            guild.influence = guild_api_data["influence"]
-            guild.aetherium = guild_api_data["aetherium"]
-            guild.resonance = guild_api_data["resonance"]
-            guild.favor = guild_api_data["favor"]
-            guild.last_log_id = guild_api_data.get("last_log_id", guild.last_log_id)
-            guild.last_updated = datetime.utcnow()
+        # Process guild data
+        if not guild:
+            guild = Guild(
+                id=guild_api_data["id"],
+                name=guild_api_data["name"],
+                tag=guild_api_data["tag"],
+                level=guild_api_data.get("level", 0),
+                motd=guild_api_data["motd"],
+                influence=guild_api_data["influence"],
+                aetherium=guild_api_data["aetherium"],
+                resonance=guild_api_data["resonance"],
+                favor=guild_api_data["favor"],
+                last_log_id=guild_api_data.get("last_log_id", 0)
+            )
+            db.add(guild)
+            db.flush()
+        
+        guild.name = guild_api_data["name"]
+        guild.tag = guild_api_data["tag"]
+        guild.level = guild_api_data.get("level", 0)
+        guild.motd = guild_api_data["motd"]
+        guild.influence = guild_api_data["influence"]
+        guild.aetherium = guild_api_data["aetherium"]
+        guild.resonance = guild_api_data["resonance"]
+        guild.favor = guild_api_data["favor"]
+        guild.last_log_id = guild_api_data.get("last_log_id", guild.last_log_id)
+        guild.last_updated = datetime.utcnow()
+        db.flush()
+
+        # Process emblem
+        if guild_api_data.get("emblem"):
+            emblem_data = guild_api_data["emblem"]
+            if not guild.emblem:
+                guild.emblem = GuildEmblem(guild_id=guild.id)
+            guild.emblem.background_id = emblem_data["background"]["id"]
+            guild.emblem.background_colors = emblem_data["background"]["colors"]
+            guild.emblem.foreground_id = emblem_data["foreground"]["id"]
+            guild.emblem.foreground_colors = emblem_data["foreground"]["colors"]
+            guild.emblem.flags = emblem_data.get("flags", [])
+            db.flush()
+        
+        # Process logs
+        if guild_api_data.get("logs"):
+            new_logs_count = 0
+            for log_entry_data in guild_api_data["logs"]:
+                log_type = log_entry_data["type"]
+                if log_type not in LOG_TYPE_MAP:
+                    logger.warning(f"Core Logic: Unknown log type: {log_type} for guild {guild_id}")
+                    continue
+                
+                log_model_cls = LOG_TYPE_MAP[log_type]
+                existing_log = db.query(log_model_cls).filter_by(guild_id=guild_id, id=log_entry_data["id"]).first()
+                
+                if not existing_log:
+                    new_log = create_log_entry(guild_id, log_entry_data)
+                    db.add(new_log)
+                    db.flush()
+                    new_logs_count += 1
+
+                    # Process lottery entries for stash deposits in a new transaction
+                    if log_type == "stash" and log_entry_data["operation"] == "deposit" and log_entry_data.get("coins", 0) > 0:
+                        try:
+                            # Get account ID for the user who made the deposit
+                            account = db.query(Account).filter_by(current_account_name=log_entry_data["user"]).first()
+                            if account:
+                                # Process lottery entry in a completely separate transaction
+                                # We'll let the lottery function handle its own session
+                                from app.database import SessionLocal as LotterySessionLocal
+                                lottery_db = LotterySessionLocal()
+                                try:
+                                    result = await process_lottery_entry(
+                                        guild_id=guild_id,
+                                        account_id=account.id,
+                                        copper_amount=log_entry_data["coins"],
+                                        db=lottery_db
+                                    )
+                                    if result:
+                                        logger.info(f"Successfully processed lottery entry for {account.current_account_name}")
+                                except Exception as e:
+                                    logger.error(f"Error processing lottery entry for {account.current_account_name} in guild {guild_id}: {e}")
+                                finally:
+                                    lottery_db.close()
+                        except Exception as e:
+                            logger.error(f"Error looking up account for lottery entry: {e}")
+                            continue
+
+            if new_logs_count > 0:
+                logger.info(f"Core Logic: Added {new_logs_count} new logs for guild {guild_id}")
+
+        # Process ranks
+        if guild_api_data.get("ranks"):
+            existing_ranks = {rank.id: rank for rank in db.query(GuildRank).filter_by(guild_id=guild_id).all()}
+            processed_rank_ids = set()
+            for rank_data in guild_api_data["ranks"]:
+                rank_id = rank_data["id"]
+                processed_rank_ids.add(rank_id)
+                rank = existing_ranks.get(rank_id)
+                if rank:
+                    rank.order = rank_data["order"]
+                    rank.permissions = rank_data["permissions"]
+                    rank.icon = rank_data.get("icon")
+                else:
+                    rank = GuildRank.from_api_response(guild_id, rank_data)
+                    db.add(rank)
+            for rank_id_to_delete in set(existing_ranks.keys()) - processed_rank_ids:
+                db.delete(existing_ranks[rank_id_to_delete])
             db.flush()
 
-            if guild_api_data.get("emblem"):
-                emblem_data = guild_api_data["emblem"]
-                if not guild.emblem:
-                    guild.emblem = GuildEmblem(guild_id=guild.id)
-                guild.emblem.background_id = emblem_data["background"]["id"]
-                guild.emblem.background_colors = emblem_data["background"]["colors"]
-                guild.emblem.foreground_id = emblem_data["foreground"]["id"]
-                guild.emblem.foreground_colors = emblem_data["foreground"]["colors"]
-                guild.emblem.flags = emblem_data.get("flags", [])
-                db.flush()
-            
-            if guild_api_data.get("logs"):
-                new_logs_count = 0
-                for log_entry_data in guild_api_data["logs"]:
-                    log_type = log_entry_data["type"]
-                    if log_type not in LOG_TYPE_MAP:
-                        logger.warning(f"Core Logic: Unknown log type: {log_type} for guild {guild_id}")
-                        continue
-                    log_model_cls = LOG_TYPE_MAP[log_type]
-                    existing_log = db.query(log_model_cls).filter_by(guild_id=guild_id, id=log_entry_data["id"]).first()
-                    if not existing_log:
-                        new_log = create_log_entry(guild_id, log_entry_data)
-                        db.add(new_log)
-                        new_logs_count += 1
-                if new_logs_count > 0:
-                    logger.info(f"Core Logic: Added {new_logs_count} new logs for guild {guild_id}")
-                db.flush()
-
-            if guild_api_data.get("ranks"):
-                existing_ranks = {rank.id: rank for rank in db.query(GuildRank).filter_by(guild_id=guild_id).all()}
-                processed_rank_ids = set()
-                for rank_data in guild_api_data["ranks"]:
-                    rank_id = rank_data["id"]
-                    processed_rank_ids.add(rank_id)
-                    rank = existing_ranks.get(rank_id)
-                    if rank:
-                        rank.order = rank_data["order"]
-                        rank.permissions = rank_data["permissions"]
-                        rank.icon = rank_data.get("icon")
-                    else:
-                        rank = GuildRank.from_api_response(guild_id, rank_data)
-                        db.add(rank)
-                for rank_id_to_delete in set(existing_ranks.keys()) - processed_rank_ids:
-                    db.delete(existing_ranks[rank_id_to_delete])
-                db.flush()
-
-            if guild_api_data.get("members"):
-                for member_data in guild_api_data["members"]:
-                    # Get or create the account
-                    account = Account.get_or_create(db, member_data["name"])
-                    # Add or update the guild membership
-                    GuildMembership.add_or_update(db, account.id, guild_id, member_data)
-                db.flush()
+        # Process members
+        if guild_api_data.get("members"):
+            for member_data in guild_api_data["members"]:
+                # Get or create the account
+                account = Account.get_or_create(db, member_data["name"])
+                # Add or update the guild membership
+                GuildMembership.add_or_update(db, account.id, guild_id, member_data)
+            db.flush()
         
         db.commit()
         logger.info(f"Core Logic: Update completed successfully for guild {guild_id}")

@@ -3,6 +3,7 @@ import { Box, Typography, CssBaseline, useMediaQuery } from '@mui/material';
 import { createTheme, ThemeProvider, useTheme } from '@mui/material/styles';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toolbar } from '@mui/material';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import TitleBar from "./components/TitleBar";
 import SideBar from "./components/SideBar";
@@ -11,9 +12,21 @@ import HomePage from "./pages/Home";
 import GuildDashboard from "./pages/GuildDashboard";
 import GuildLogsPage from "./pages/GuildLogsPage";
 import GuildMembersPage from "./pages/GuildMembersPage";
+import GuildLotteryPage from "./pages/GuildLotteryPage";
 import AboutPage from "./pages/About";
 import ContactPage from "./pages/Contact";
 import RegistrationPage from './pages/RegistrationPage';
+import LoginPage from './pages/LoginPage';
+
+// Create a client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const appTheme = createTheme({
   palette: {
@@ -109,6 +122,8 @@ const App: React.FC = () => {
         return <GuildMembersPage />;
       case 'GuildLogs':
         return <GuildLogsPage />;
+      case 'GuildLottery':
+        return <GuildLotteryPage />;
       case 'About':
         return <AboutPage />;
       case 'Contact':
@@ -121,42 +136,44 @@ const App: React.FC = () => {
   };
 
   return (
-    <Router>
-      <ThemeProvider theme={appTheme}>
-        <CssBaseline />
-        <Box sx={{ display:"flex", flexDirection:"column", minHeight: '100vh', bgcolor: 'background.default' }}>
-          <TitleBar onMobileMenuToggle={isMobile ? handleDrawerToggle : undefined} />
-          <Box sx={{ display: 'flex', flex: 1, mt: isMobile ? 0 : `64px` /* Account for fixed AppBar height */ }}>
-            <SideBar 
-              onSelect={(selectedPage) => {
-                setContent(selectedPage);
-                if (isMobile) {
-                  setMobileOpen(false);
-                }
-              }}
-              mobileOpen={mobileOpen} 
-              onMobileClose={handleDrawerToggle} 
-            />
-            <Box 
-              component="main" // Semantic main content area
-              sx={{ 
-                flexGrow: 1, 
-                p: 3, 
-                // ml: isMobile ? 0 : `240px` // This might not be needed if SideBar handles its own display correctly
-                width: isMobile ? '100%' : `calc(100% - 240px)` // Ensure content takes remaining width
-              }}
-            >
-              <Toolbar />
-              <Routes>
-                <Route path="/" element={renderContent()} />
-                <Route path="/register" element={<RegistrationPage />} />
-              </Routes>
-              <Footer />
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <ThemeProvider theme={appTheme}>
+          <CssBaseline />
+          <Box sx={{ display:"flex", flexDirection:"column", minHeight: '100vh', bgcolor: 'background.default' }}>
+            <TitleBar onMobileMenuToggle={isMobile ? handleDrawerToggle : undefined} />
+            <Box sx={{ display: 'flex', flex: 1, mt: isMobile ? 0 : `64px` /* Account for fixed AppBar height */ }}>
+              <SideBar 
+                onSelect={(selectedPage) => {
+                  setContent(selectedPage);
+                  if (isMobile) {
+                    setMobileOpen(false);
+                  }
+                }}
+                mobileOpen={mobileOpen} 
+                onMobileClose={handleDrawerToggle} 
+              />
+              <Box 
+                component="main" // Semantic main content area
+                sx={{ 
+                  flexGrow: 1, 
+                  p: 3, 
+                  width: isMobile ? '100%' : `calc(100% - 240px)` // Ensure content takes remaining width
+                }}
+              >
+                <Toolbar />
+                <Routes>
+                  <Route path="/" element={renderContent()} />
+                  <Route path="/register" element={<RegistrationPage />} />
+                  <Route path="/login" element={<LoginPage />} />
+                </Routes>
+                <Footer />
+              </Box>
             </Box>
           </Box>
-        </Box>
-      </ThemeProvider>
-    </Router>
+        </ThemeProvider>
+      </Router>
+    </QueryClientProvider>
   )
 }
 

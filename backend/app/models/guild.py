@@ -55,6 +55,10 @@ class Guild(Base):
     )
     ranks = relationship("GuildRank", back_populates="guild", cascade="all, delete-orphan")
 
+    # Lottery relationships
+    lottery_entries = relationship("LotteryEntry", back_populates="guild", cascade="all, delete-orphan")
+    lottery_winners = relationship("LotteryWinner", back_populates="guild", cascade="all, delete-orphan")
+
     def to_dict(self):
         """Convert the guild model to a dictionary matching the GW2 API response format."""
         # Get member data including their rank and join date for this guild

@@ -30,6 +30,10 @@ class Account(Base):
     mod_actions = relationship("ModAction", back_populates="account", order_by="ModAction.created_at.desc()")
     standing = relationship("GuildStanding", back_populates="account", uselist=False, cascade="all, delete-orphan")
     
+    # Lottery relationships
+    lottery_entries = relationship("LotteryEntry", back_populates="account", cascade="all, delete-orphan")
+    lottery_wins = relationship("LotteryWinner", back_populates="account", cascade="all, delete-orphan")
+    
     @property
     def is_banned(self) -> bool:
         """Check if account has any active ban."""

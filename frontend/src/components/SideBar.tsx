@@ -5,6 +5,7 @@ import ListAltIcon from '@mui/icons-material/ListAlt';
 import InfoIcon from '@mui/icons-material/Info';
 import ContactMailIcon from '@mui/icons-material/ContactMail';
 import PeopleIcon from '@mui/icons-material/People';
+import CasinoIcon from '@mui/icons-material/Casino';
 import React from 'react';
 
 interface SideBarProps {
@@ -25,6 +26,7 @@ const SideBar: React.FC<SideBarProps> = ({ onSelect, mobileOpen, onMobileClose }
     { text: 'Guild Dashboard', icon: <DashboardIcon />, value: 'GuildDashboard' },
     { text: 'Guild Members', icon: <PeopleIcon />, value: 'GuildMembers' },
     { text: 'Guild Logs', icon: <ListAltIcon />, value: 'GuildLogs' },
+    { text: 'Guild Lottery', icon: <CasinoIcon />, value: 'GuildLottery' },
     { text: 'About', icon: <InfoIcon />, value: 'About' },
     { text: 'Contact', icon: <ContactMailIcon />, value: 'Contact' },
   ];

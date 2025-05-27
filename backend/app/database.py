@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -19,12 +19,26 @@ try:
     os.makedirs(DATA_DIR, exist_ok=True)
     logger.info(f"Using data directory: {os.path.abspath(DATA_DIR)}")
 
-    # Create SQLite engine
-    # check_same_thread is needed for SQLite specifically
+    # Create SQLite engine with better configuration for concurrent access
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL, 
-        connect_args={"check_same_thread": False}
+        connect_args={
+            "check_same_thread": False,
+            "timeout": 30.0  # 30 second timeout for locks
+        },
+        pool_pre_ping=True,  # Verify connections before using them
+        pool_size=5,  # Connection pool size
+        max_overflow=10  # Maximum overflow connections
     )
+
+    # Enable WAL mode for better concurrent access
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
+        cursor.execute("PRAGMA synchronous=NORMAL")  # Better performance
+        cursor.close()
 
     # Create SessionLocal class
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
